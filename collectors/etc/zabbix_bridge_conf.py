@@ -253,10 +253,10 @@ def get_settings():
     return {
         # DB credentials (see pymysql connection info).
         'mysql': {
-            'host': '9ex-dc-monitordb01.corp.internal',
+            'host': 'dbhost.domain.tld',
             'port': 3306,
-            'user': 'kyle.mallory',
-            'passwd': 'BAG0farts!280',
+            'user': 'username',
+            'passwd': 'password',
             'db': 'zabbix'
         },
         'loglevel': 'DEBUG',
@@ -278,10 +278,10 @@ def get_settings():
             # This is important behaviour, as the application of zabbix macros will do the same -- TODO: Revisit this design choice
             # -- perhaps we need to build a complete list of all macros for a given host, and let the last matching macro override all others
             'macros': {
-                'memberWeb-trust02.xmission-51e.prod': {
-                    '{$APP1_CONTEXT}': '3point5',
-                    '{$APP2_CONTEXT}': 'promotive',
-                    '{$APP3_CONTEXT}': 'experticity'
+                'hostfoo.domain': {
+                    '{$APP1_CONTEXT}': 'app1',
+                    '{$APP2_CONTEXT}': 'app2',
+                    '{$APP3_CONTEXT}': 'app3'
                 }
             },
             'item-key': hostItemMapping,
