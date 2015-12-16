@@ -30,10 +30,16 @@ def get_settings():
         # },
         ('(9ex-\w+)-([\w-]+)\.(\w+)\.(\w+)', { # 9ex-dc-monitordb01.corp.internal
             'role': '{2}',
-            'host': '{1}.{2}.{3}.{4}',
+            'host': '{0}',
             'location': '{1}',
             'environment': '{3}.{4}',
             'class': '{4}'
+        }),
+        ('(dev\w+)(-(\w+))*\.corp.internal', { # dev14-1.corp.internal
+            'host': '{0}',
+            'location': 'corp',
+            'environment': '{1}',
+            'class': 'dev'
         }),
         ('(\w+)-(\w+)\.([\w-]+)\.(\w+)', { # memberWeb-trust02.xmission-51e.prod
             'role': '{1}',
@@ -57,7 +63,7 @@ def get_settings():
             #  jmx['domain:query','attribute']
             # 'domain', 'query', 'attribute' are always placed into the parameter map, but are only ever explicitly expanded into tags
             'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
-            'argParser': 'named', # which parser to use for this item's args; 'jmx' parser expects 2 parameters, the first is a query, comprised of a list of name-value pairs, with an optional, proceeding 'domain'; the second is an 'attribute' name.
+            'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters, the first is a query, comprised of a list of name-value pairs, with an optional, proceeding 'domain'; the second is an 'attribute' name.
             'flags': { # parameters to pass to the argParser
                 'expandParameters': True, # whether to create tags from jmx MBean query params:  Ie, "domain:type=Foo,name=bar" expands tags: type=Foo and name=bar
             },
@@ -174,7 +180,7 @@ def get_settings():
             },
             'metric': 'web.test.{1}',
         }),
-         ('log\[([^\]]*)\]', {
+        ('log\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
             'flags': {
                 'namedParameters': ['file','regex','encoding','maxlines','mode'],
@@ -182,7 +188,7 @@ def get_settings():
             },
             'metric': 'log',
         }),
-         ('logrt\[([^\]]*)\]', {
+        ('logrt\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
             'flags': {
                 'namedParameters': ['file','regex','encoding','maxlines','mode'],
@@ -190,7 +196,7 @@ def get_settings():
             },
             'metric': 'log.rt',
         }),
-         ('net\.dns(\.record)\[([^\]]*)\]', {
+        ('net\.dns(\.record)\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
             'argString': '{2}',
             'flags': {
@@ -279,7 +285,7 @@ def get_settings():
             'flags': {
                 'namedParameters': ['path','attribute'],
             },
-            'metric': 'vfs.fs.{@attribute}',
+            'metric': 'vfs.fs.{1}.{@attribute}',
             'tags': {
                 'fs': '{@path}'
             }
@@ -343,8 +349,8 @@ def get_settings():
         'logfile': '/var/log/zabbix_collector.log',
         'slaveid': 31,                    # Slave identifier, it should be unique.
         'disallow': '[^a-zA-Z0-9\-_\.\/]', # Regex of characters to replace with _.
-        'macroRefreshInterval': 120,       # How often to reload itemid, hostmap from DB.
-        'itemRefreshInterval': 600,       # How often to reload itemid, hostmap from DB.
+        'macroRefreshInterval': 7200,       # How often (seconds) to reload macros from Zabbix (fast & few)   2 hour
+        'itemRefreshInterval': 86400,      # How often (seconds) to reload itemid, hostmap from Zabbix (many and slow)   24 hours
         'ignored-keys': [
         ],
         'ignored-hosts': [

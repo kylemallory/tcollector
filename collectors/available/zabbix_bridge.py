@@ -376,7 +376,7 @@ def doZabbixStream(mapDb):
                                 server_id=settings['slaveid'],
                                 only_events=[WriteRowsEvent],
                                 resume_stream=True,
-                                blocking=True)
+                                blocking=False)
 
     lastLogTime = lastAlertTime = startTime = time.time()
     timeDelta = 0
@@ -400,6 +400,11 @@ def doZabbixStream(mapDb):
                     lastDataTime = time.time()
                     if r['clock'] > lastItemTime:
                         lastItemTime = r['clock']
+
+                    # drop data points that are more then 15 minutes old (this should keep us current, or at least 15 minutes current)
+                    # if (time.time() - r['clock']) > 900:
+                    #     logging.info("Skipping old data to catch up...");
+                    #     continue
 
                     hostItem = None;
                     try:
