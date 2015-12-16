@@ -5,26 +5,77 @@ except ImportError:
     from ordereddict import OrderedDict
 
 def get_settings():
-    altItemMappings = OrderedDict([
-        ('jmx', {
-            'argParser': 'jmxParser', # which parser to use for this item's parameters
-            'flags': { # parameters to pass to the argParder
-                'expandParameters': True, # don't remember what this was for
-                'splitExpression': ',', # a regex expression passed to regex.split() that is used to split the parameters; defaults to ','
-                'paramPrefix': 'jmx', # the name used to store the parameters, ie, 'jmx'.  Parameters are then expanded using {jmx[index]} or {jmx.name}
-                'namedParameters': True
-            },
-            'metric': 'jmx.{1}.{jmx:1}',
-            'tags': {
-                'jmx.domain': '{jmxDomain}',
-                'jmx.bean.{jmxBean}': '{value}'
-            }
+    hostMappings = OrderedDict([
+        # a regex expression to match a given zabbix host
+        # a set of tags to include in the metric when a zabbix host matches the regex
+        # 'role-host.dc01.domain.tld': {
+        #     'host': 'host.dc01.domain.tld',
+        #     'location': 'dc01',
+        #     'domain': 'domain.tld'
+        # },
+        # '([A-Za-z0-9\-]+)-([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)': { # role-host.subdomain.domain.tld
+        #     'role': '{1}',
+        #     'host': '{2}.{3}.{4}',
+        #     'location': '{2}',
+        #     'domain': '{3}.{4}',
+        #     'fqdn': '{0}'
+        # }
+        # a regex expression to match a given zabbix host
+        # a set of tags to include in the metric when a zabbix host matches the regex
+        # 'memberWeb-trust02.xmission-51e.prod': {
+        #     'host': 'trust02.xmission-51e.prod',
+        #     'location': 'xmission-51e',
+        #     'environment': 'xmission-51e.prod',
+        #     'class': 'prod'
+        # },
+        ('(9ex-\w+)-([\w-]+)\.(\w+)\.(\w+)', { # 9ex-dc-monitordb01.corp.internal
+            'role': '{2}',
+            'host': '{1}.{2}.{3}.{4}',
+            'location': '{1}',
+            'environment': '{3}.{4}',
+            'class': '{4}'
+        }),
+        ('(\w+)-(\w+)\.([\w-]+)\.(\w+)', { # memberWeb-trust02.xmission-51e.prod
+            'role': '{1}',
+            'host': '{2}.{3}.{4}',
+            'location': '{3}',
+            'environment': '{3}.{4}',
+            'class': '{4}'
+        }),
+        ('(\w+)\.([\w-]+)\.(\w+)', { # trust02.xmission-51e.prod
+            'host': '{1}.{2}.{3}',
+            'environment': '{2}.{3}',
+            'location': '{2}',
+            'class': '{3}'
         })
     ])
 
-    hostItemMapping = OrderedDict([
+    itemMappings = OrderedDict([
         # key: a regex expression to match a given zabbix item key
         # val: a dict that includes the new metric name, and all tags to be associated with the new metric
+        ('redis\.trap\[(.*)::(.*)\]', {
+            #  jmx['domain:query','attribute']
+            # 'domain', 'query', 'attribute' are always placed into the parameter map, but are only ever explicitly expanded into tags
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
+            'argParser': 'named', # which parser to use for this item's args; 'jmx' parser expects 2 parameters, the first is a query, comprised of a list of name-value pairs, with an optional, proceeding 'domain'; the second is an 'attribute' name.
+            'flags': { # parameters to pass to the argParser
+                'expandParameters': True, # whether to create tags from jmx MBean query params:  Ie, "domain:type=Foo,name=bar" expands tags: type=Foo and name=bar
+            },
+            'metric': '{2}',
+            'tags': {} # these are appended to any that the argParser populated (ie, via expandParameters)
+        }),
+        ('jmx(\[([^\]]*)\])', {
+            #  jmx['domain:query','attribute']
+            # 'domain', 'query', 'attribute' are always placed into the parameter map, but are only ever explicitly expanded into tags
+            'argString': '{2}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
+            'argParser': 'jmx', # which parser to use for this item's args; 'jmx' parser expects 2 parameters, the first is a query, comprised of a list of name-value pairs, with an optional, proceeding 'domain'; the second is an 'attribute' name.
+            'flags': { # parameters to pass to the argParser
+                'expandParameters': True, # whether to create tags from jmx MBean query params:  Ie, "domain:type=Foo,name=bar" expands tags: type=Foo and name=bar
+                'parameterPrefix': 'jmx.' # a prefix to prepend on all parameters parsed by the parser, ie, 'jmx.'.  Parameters are then expanded using {jmx.type}
+            },
+            'metric': 'jmx.{@jmx.domain}.{@jmx.attribute}',
+            'tags': {} # these are appended to any that the argParser populated (ie, via expandParameters)
+        }),
         ('jmx-processing-time-per-request-(.+)$', {
             'metric': 'jmx.Catalina.processingTimePerRequest',
             'tags': {
@@ -82,146 +133,156 @@ def get_settings():
                 'device': '{1}'
             }
         }),
-        ('hastat\.(.+)-(BACKEND|FRONTEND)-(.+)', {
-            'metric': 'haproxy.{3}',
+        ('hastat\.(dmz|trust)_(.+)-(BACKEND|FRONTEND)-(.+)', {
+            'metric': 'haproxy.{4}',
             'tags': {
-                'directon': '{2}',
-                'interface': '{1}'
+                'direction': '{3}',
+                'interface': '{2}',
+                'zone': '{1}'
             }
         }),
-        ('icmppingsec\[([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
-            'metric': 'icmp.ping.responseTime.secs',
-            'tags': {
-                'target': '{1}',
-                'packet-count': '{2}',
-                'packet-interval': '{3}',
-                'packet-size': '{4}',
-                'timeout': '{5}',
-                'mode': '{6}'
-            }
-        }),
-        ('icmppingloss\[([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
-            'metric': 'icmp.ping.percentLoss',
-            'tags': {
-                'target': '{1}',
-                'packet-count': '{2}',
-                'packet-interval': '{3}',
-                'packet-size': '{4}',
-                'timeout': '{5}'
-            }
-        }),
-        ('icmpping\[([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
+        ('icmpping\[([^\]]*)\]', {
+            'argParser': 'index'
+            'flags': {
+                'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
+                'expandParameters': True
+            },
             'metric': 'icmp.ping.success',
-            'tags': {
-                'target': '{1}',
-                'packet-count': '{2}',
-                'packet-interval': '{3}',
-                'packet-size': '{4}',
-                'timeout': '{5}'
-            }
         }),
-        ('log\[([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
+        ('icmppingsec\[([^\]]*)\]', {
+            'argParser': 'index'
+            'flags': {
+                'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
+                'expandParameters': True
+            },
+            'metric': 'icmp.ping.responseTime.secs',
+        }),
+        ('icmppingloss\[([^\]]*)\]', {
+            'argParser': 'index'
+            'flags': {
+                'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
+                'expandParameters': True
+            },
+            'metric': 'icmp.ping.percentLoss',
+        }),
+        ('web.test.([^\[]*)\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{2}',
+            'flags': {
+                'namedParameters': ['scenario','step','resp'],
+                'expandParameters': True
+            },
+            'metric': 'web.test.{1}',
+        }),
+         ('log\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['file','regex','encoding','maxlines','mode'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
             'metric': 'log',
-            'tags': {
-                'file': '{1}',
-                'regex': '{2}',
-                'encoding': '{3}',
-                'maxlines': '{4}',
-                'mode': '{5}'
-            }
         }),
-        ('logrt\[([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
-            'metric': 'logrt',
-            'tags': {
-                'format': '{1}',
-                'regex': '{2}',
-                'encoding': '{3}',
-                'maxlines': '{4}',
-                'mode': '{5}'
-            }
+         ('logrt\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['file','regex','encoding','maxlines','mode'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
+            'metric': 'log.rt',
         }),
-        ('net\.dns(\.record)\[([^,]*),?([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
-            'metric': 'net.dns{1}',
-            'tags': {
-                'ip': '{2}',
-                'zone': '{3}',
-                'type': '{4}',
-                'timeout': '{5}',
-                'count': '{6}'
-            }
+         ('net\.dns(\.record)\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{2}',
+            'flags': {
+                'namedParameters': ['ip','zone','type','timeout','count'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
+            'metric': 'log',
         }),
-        ('net\.if(\.([^\[]*))\[([^,]+),?([^,]*)\]', {
+        ('net\.if(\.[^\[]*)\[([^,]+),?([^,]*)\]', {
             # this matches net.if[*] as well as net.if.collisions[*], with the . as part of the first capture group (so don't reprint it in the metric name)
-            'metric': 'net.interface.{4}',
+            'metric': 'net.interface{1}.{3}',
             'tags': {
-                'type': '{2}',
-                'interface': '{3}'
+                'interface': '{2}'
             }
         }),
-        ('net\.(tcp|udp)\.listen\[([^,]*)\]', {
+        ('net\.(tcp|udp)\.listen\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['port'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
             'metric': 'net.{1}.listen',
-            'tags': {
-                'port': '{2}'
-            }
         }),
-        ('net\.tcp\.port\[([^,]*),?([^,]+)\]', {
-            'metric': 'net.tcp.listen',
-            'tags': {
-                'ip': '{1}',
-                'port': '{2}'
-            }
+        ('net\.tcp\.port\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['ip','port'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
+            'metric': 'net.tcp.port',
         }),
-        ('net\.tcp\.service\[([^,]*),?([^,]*),?([^,]*)\]', {
-            'metric': 'net.tcp.service.available',
-            'tags': {
-                'service': '{1}',
-                'ip': '{2}',
-                'port': '{3}'
-            }
+        ('net\.tcp\.service\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['service','ip','port'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
+            'metric': 'net.tcp.service',
         }),
-        ('net\.tcp\.service.perf\[([^,]*),?([^,]*),?([^,]*)\]', {
+        ('net\.tcp\.service.perf\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['service','ip','port'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
             'metric': 'net.tcp.service.timeToConnect',
-            'tags': {
-                'service': '{1}',
-                'ip': '{2}',
-                'port': '{3}'
-            }
         }),
-        ('proc\.mem\[([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
+        ('proc\.mem\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['name','user','method','cmdline'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
             'metric': 'system.processes.memory',
-            'tags': {
-                'name': '{1}',
-                'user': '{2}',
-                'method': '{3}',
-                'cmdline': '{4}'
-            }
         }),
-        ('proc\.num\[([^,]*),?([^,]*),?([^,]*),?([^,]*)\]', {
+        ('proc\.num\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['name','user','method','cmdline'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
             'metric': 'system.processes.count',
-            'tags': {
-                'name': '{1}',
-                'user': '{2}',
-                'state': '{3}',
-                'cmdline': '{4}'
-            }
         }),
-        ('system\.cpu\.load\[([^,]*),?([^,]*)\]', {
+        ('system\.cpu\.load\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['cpu','sampleInterval'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
             'metric': 'system.cpu.load',
-            'tags': {
-                'cpu': '{1}',
-                'sampleInterval': '{2}'
-            }
         }),
-        ('system\.cpu\.util\[([^,]*),?([^,]*),?([^,]*)\]', {
-            'metric': 'system.cpu.util',
-            'tags': {
-                'cpu': '{1}',
-                'type': '{2}',
-                'sampleInterval': '{3}'
-            }
+        ('system\.cpu\.util\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'flags': {
+                'namedParameters': ['cpu','type','sampleInterval'],
+                'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
+            },
+            'metric': 'system.cpu.utilization',
         }),
         ('system\.swap\.(.+)\[,\s*([^\]]+)\]', {
             'metric': 'system.swap.{1}.{2}',
+        }),
+        ('vfs.fs.([^\[]+)\[([^\]]*)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{2}',
+            'flags': {
+                'namedParameters': ['path','attribute'],
+            },
+            'metric': 'vfs.fs.{@attribute}',
+            'tags': {
+                'fs': '{@path}'
+            }
         }),
         ('vfs\.fs(\.[^\[]+)\[([^,]*),?([^\]]+)\]', {
             'metric': 'vfs{1}.{3}',
@@ -242,9 +303,24 @@ def get_settings():
                 'file': '{1}'
             }
         }),
+        ('(vm\.memory\.size)\[(.+)\]', {
+            'metric': 'vm.memory.{2}'
+        }),
         # This is the default, fall-through catch-all
-        ('([A-Za-z0-9_\-\.]+)\.*\[,*\"*([^\"\]]+)\"*\]', {
-            'metric': '{1}.{2}'
+        # ('([A-Za-z0-9_\-\.]+)\.*\[,*\"*([^\"\]]+)\"*\]', {
+        #     'metric': '{1}.{2}'
+        # })
+        ('(.+)\[(.+)\]', {
+            'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{2}',
+            'flags': {
+                'expandParameters': True,
+                'parameterPrefix': 'param.'
+            },
+            'metric': '{1}'
+        }),
+        ('.+', {
+            'metric': '{0}'
         })
     ])
 
@@ -253,18 +329,22 @@ def get_settings():
     return {
         # DB credentials (see pymysql connection info).
         'mysql': {
-            'host': 'dbhost.domain.tld',
+#            'host': 'dbhost.domain.tld',
+#            'port': 3306,
+#            'user': 'username',
+#            'passwd': 'password',
+            'host': '9ex-dc-monitordb01.corp.internal',
             'port': 3306,
-            'user': 'username',
-            'passwd': 'password',
+            'user': 'zabbix_repl',
+            'passwd': 'ReplicateZabbix',
             'db': 'zabbix'
         },
-        'loglevel': 'DEBUG',
+        'loglevel': 'INFO',
         'logfile': '/var/log/zabbix_collector.log',
         'slaveid': 31,                    # Slave identifier, it should be unique.
         'disallow': '[^a-zA-Z0-9\-_\.\/]', # Regex of characters to replace with _.
-        'macroMapInterval': 1200,       # How often to reload itemid, hostmap from DB.
-        'hostMapInterval': 1200,       # How often to reload itemid, hostmap from DB.
+        'macroRefreshInterval': 120,       # How often to reload itemid, hostmap from DB.
+        'itemRefreshInterval': 600,       # How often to reload itemid, hostmap from DB.
         'ignored-keys': [
         ],
         'ignored-hosts': [
@@ -284,37 +364,8 @@ def get_settings():
                     '{$APP3_CONTEXT}': 'app3'
                 }
             },
-            'item-key': hostItemMapping,
-            'item-host': {
-                # a regex expression to match a given zabbix host
-                # a set of tags to include in the metric when a zabbix host matches the regex
-                # 'memberWeb-trust02.xmission-51e.prod': {
-                #     'host': 'trust02.xmission-51e.prod',
-                #     'location': 'xmission-51e',
-                #     'environment': 'xmission-51e.prod',
-                #     'class': 'prod'
-                # },
-                '(9ex-dc)-([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)': { # 9ex-dc-monitordb01.corp.internal
-                    'role': '{2}',
-                    'host': '{2}.{3}.{4}',
-                    'location': '{1}',
-                    'environment': '{3}.{4}',
-                    'class': '{4}'
-                },
-                '([A-Za-z0-9\-]+)-([A-Za-z0-9]+)\.([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)': { # memberWeb-trust02.xmission-51e.prod
-                    'role': '{1}',
-                    'host': '{2}.{3}.{4}',
-                    'location': '{3}',
-                    'environment': '{3}.{4}',
-                    'class': '{4}'
-                },
-                '([A-Za-z0-9]+)\.([A-Za-z0-9-]+)\.([A-Za-z0-9-]+)': { # memberWeb-trust02.xmission-51e.prod
-                    'host': '{1}.{2}.{3}',
-                    'environment': '{2}.{3}',
-                    'location': '{2}',
-                    'class': '{3}'
-                }
-            }
+            'item-key': itemMappings,
+            'item-host': hostMappings
         }
     }
 
