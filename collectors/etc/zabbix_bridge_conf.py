@@ -59,13 +59,19 @@ def get_settings():
     itemMappings = OrderedDict([
         # key: a regex expression to match a given zabbix item key
         # val: a dict that includes the new metric name, and all tags to be associated with the new metric
-        ('redis\.trap\[(.*)::(.*)\]', {
-            #  jmx['domain:query','attribute']
-            # 'domain', 'query', 'attribute' are always placed into the parameter map, but are only ever explicitly expanded into tags
+
+	# haproxy.trap["instance=haproxy-external-trust,end=BACKEND,role=entity-search-xapi::haproxy.bck"]
+        ('haproxy\.trap\[\"(.*)::(.*)\"\]', {
             'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
-            'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters, the first is a query, comprised of a list of name-value pairs, with an optional, proceeding 'domain'; the second is an 'attribute' name.
+            'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters 
+            'flags': { 'expandParameters': True },
+            'metric': '{2}',
+        }),
+        ('redis\.trap\[(.*)::(.*)\]', {
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
+            'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters
             'flags': { # parameters to pass to the argParser
-                'expandParameters': True, # whether to create tags from jmx MBean query params:  Ie, "domain:type=Foo,name=bar" expands tags: type=Foo and name=bar
+                'expandParameters': True, # whether to create tags from named query params:  Ie, "type=Foo,name=bar" expands tags: type=Foo and name=bar
             },
             'metric': '{2}',
             'tags': {} # these are appended to any that the argParser populated (ie, via expandParameters)
@@ -148,7 +154,7 @@ def get_settings():
             }
         }),
         ('icmpping\[([^\]]*)\]', {
-            'argParser': 'index'
+            'argParser': 'index',
             'flags': {
                 'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
                 'expandParameters': True
@@ -156,7 +162,7 @@ def get_settings():
             'metric': 'icmp.ping.success',
         }),
         ('icmppingsec\[([^\]]*)\]', {
-            'argParser': 'index'
+            'argParser': 'index',
             'flags': {
                 'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
                 'expandParameters': True
@@ -164,7 +170,7 @@ def get_settings():
             'metric': 'icmp.ping.responseTime.secs',
         }),
         ('icmppingloss\[([^\]]*)\]', {
-            'argParser': 'index'
+            'argParser': 'index',
             'flags': {
                 'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
                 'expandParameters': True

@@ -376,7 +376,7 @@ def doZabbixStream(mapDb):
                                 server_id=settings['slaveid'],
                                 only_events=[WriteRowsEvent],
                                 resume_stream=True,
-                                blocking=False)
+                                blocking=True)
 
     lastLogTime = lastAlertTime = startTime = time.time()
     timeDelta = 0
@@ -671,7 +671,7 @@ def argParser_named(paramStr, config, match):
     paramPrefix = ''
     dialect_overrides = {}
     paramsToTags = False
-    keyValueSplitExression = '='
+    keyValueSplitExpression = '='
     if 'flags' in config:
         flags = config['flags']
         if 'dialect' in flags:
@@ -686,7 +686,7 @@ def argParser_named(paramStr, config, match):
     args = {}
     for row in csv.reader([paramStr], dialect='zabbix1', **dialect_overrides):
         try:
-            for (col) in enumerate(row):
+            for col in row:
                 pair = col.split(keyValueSplitExpression)
                 args['%s%s' % (paramPrefix, pair[0])] = pair[1]
 
