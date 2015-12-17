@@ -26,6 +26,7 @@ import logging
 import socket
 import sqlite3
 import random
+import cProfile
 
 try:
     from pymysqlreplication import BinLogStreamReader
@@ -68,6 +69,7 @@ stats['macrosExpired'] = 0
 stats['avgItemRefreshTime'] = 0
 stats['avgMacroRefreshTime'] = 0
 stats['rowCount'] = 0
+stats['rowsSkipped'] = 0
 stats['fetchCount'] = 0
 stats['fetchTime'] = 0
 stats['buildCount'] = 0
@@ -254,7 +256,8 @@ def mapItemHost(item, item_host):
                 for (tk, tv) in val.items():
                     tk = match.expandf(tk)
                     tv = match.expandf(tv)
-                    tags[tk] = tv
+                    if tk not in tags:
+                        tags[tk] = tv
                 logging.debug("MATCHED item-host [ %s ] %s => %s" % (item_host, key, tags))
                 item['tags'].update(tags);
                 return item
@@ -266,7 +269,6 @@ def mapItemHost(item, item_host):
 
 def refreshItem(mapDb, settings, itemId):
     startTime = time.time()
-    # first, check to see if any new items have been added; the last itemid should increase
     conn = pymysql.connect(**settings['mysql'])
 
     item_key = None
@@ -328,6 +330,9 @@ def fetchItem(mapDb, itemId):
             item['_key'] = row[2]
             item['metric'] = row[3]
             stats['itemsReadFromCache'] += 1
+        elif (row is not None) and (row[4] <= time.time()):
+	    item = refreshItem(mapDb, settings, itemId)
+            logging.info("fetchItem: Requested item [%s] was expired. Refreshing..." % itemId)
         else:
             return None
 
@@ -379,11 +384,12 @@ def doZabbixStream(mapDb):
                                 blocking=True)
 
     lastLogTime = lastAlertTime = startTime = time.time()
-    timeDelta = 0
+    bestTimeDelta = timeDelta = 0
     lastItemTime = 0
     invalidItemId = 0
     lastBuildCount = 0
     lastFetchCount = 0
+    lastSkippedCount = 0
 
     for binlogevent in stream:
         if binlogevent.schema == settings['mysql']['db']:
@@ -402,9 +408,9 @@ def doZabbixStream(mapDb):
                         lastItemTime = r['clock']
 
                     # drop data points that are more then 15 minutes old (this should keep us current, or at least 15 minutes current)
-                    # if (time.time() - r['clock']) > 900:
-                    #     logging.info("Skipping old data to catch up...");
-                    #     continue
+                    if (time.time() - r['clock']) > 300:
+                        stats['rowsSkipped'] += 1
+                        continue
 
                     hostItem = None;
                     try:
@@ -462,7 +468,7 @@ def doZabbixStream(mapDb):
         if lastLogInterval > 15:
             itemsPerSec = stats['rowCount'] / lastLogInterval
             itemCacheStats = getItemCacheStatus(mapDb);
-            logging.info("Item Cache Stats: %d total items, %d (%d%%) active, %d expired. %d rows processed in %s seconds.  %d items/sec." % (itemCacheStats['total'], itemCacheStats['active'], itemCacheStats['apogee'] * 100, itemCacheStats['expired'], stats['rowCount'], lastLogInterval, itemsPerSec));
+            logging.info("Zabbix Stats: %d total cached items, %d (%d%%) active, %d expired. %d rows processed in %s seconds.  %d items/sec. %d seconds behind." % (itemCacheStats['total'], itemCacheStats['active'], itemCacheStats['apogee'] * 100, itemCacheStats['expired'], stats['rowCount'], lastLogInterval, itemsPerSec, timeDelta));
             # print "tcollector.items.keyErrors %d %f collector=zabbix host=%s\n" % (time.time(), invalidItemId, socket.getfqdn())
             # print "tcollector.zabbix_bridge.items.cache.expired %d %f collector=zabbix\n" % (time.time(), stats['itemsExpired'])
             print "tcollector.zabbix_bridge.items.cache.apogee %d %f collector=zabbix" % (time.time(), itemCacheStats['apogee'])
@@ -498,6 +504,8 @@ def doZabbixStream(mapDb):
             print "tcollector.items.errors %d %f collector=zabbix\n" % (time.time(), stats['errors'])
             print "tcollector.items.sent %d %f collector=zabbix\n" % (time.time(), stats['sent'])
             print "tcollector.items.received %d %f collector=zabbix\n" % (time.time(), stats['received'])
+            print "tcollector.items.skipped %d %f collector=zabbix\n" % (time.time(), stats['rowsSkipped'])
+            print "tcollector.items.updated %d %f collector=zabbix\n" % (time.time(), stats['updated'])
             print "tcollector.items.errors %d %f collector=zabbix\n" % (time.time(), stats['errors'])
             print "tcollector.items.sent %d %f collector=zabbix\n" % (time.time(), stats['sent'])
             print "tcollector.items.perSecond %d %f collector=zabbix\n" % (time.time(), itemsPerSec)
@@ -817,7 +825,7 @@ def sanitizeMetric(metric):
         #metric = re.sub('^([A-Z])', lambda p: p.group(1).lower(), metric) # lower-case the first letter of the metric, if its not
         metric = re.sub(disallow, '', metric) # final scrub for invalid characters (strip them)
         if metric != metricIn:
-            logging.info("sanitizeMetric [ %s ] => %s" % (metricIn, metric))
+            logging.debug("sanitizeMetric [ %s ] => %s" % (metricIn, metric))
         return metric
     except Exception as e:
         logging.error('ERROR Sanitizing Metric: %s : %s' % (e, metric))
@@ -867,12 +875,13 @@ def main():
 
     logging.info("Starting zabbix-bridge....")
     mapDb = sqlite3.connect("/tmp/zabbixMap.sqlite")
+#    mapDb = sqlite3.connect(":memory:")
     mapDb.isolation_level = 'EXCLUSIVE'
     configCache(mapDb)
 #    refreshAllMacros(mapDb, settings);
     while True:
-        doZabbixStream(mapDb)
-        logging.debug("Waiting for stuff to do...")
+        cProfile.runctx('doZabbixStream(mapDb)', globals(), {'mapDb': mapDb}, '/tmp/zabbix_bridge.profile')
+        logging.info("Waiting for stuff to do...")
 
     mapDb.close()
 
