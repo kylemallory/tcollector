@@ -75,6 +75,37 @@ stats['fetchTime'] = 0
 stats['buildCount'] = 0
 stats['buildTime'] = 0
 
+transTagKeys = {
+    '^\"(.*)\"$': '\\1', # strip leading/trailing quotes
+    '\s([A-Z])': '\\1',  # strip spaces followed by a capital letter (Camel Case => CamelCase)
+    '\s([a-z])': '_\\1', # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+    '\s([0-9])': '.\\1', # replace spaces followed by a number with a dot (item 1 => item.1)
+    '^([A-Z])': lambda p: p.group(1).lower(), # lower-case the first letter of the tag key, if its not
+    settings['disallow']: ''
+}
+pattern = "(%s)" % "|".join( transTagKeys.keys() )
+logging.info("Sanitize Pattern: %s" % pattern)
+transTagKeysRegex = re.compile(pattern)
+
+transTagVals = {
+    '^\"(.*)\"$': '\\1', # strip leading/trailing quotes
+    '\s([A-Z])': '\\1',  # strip spaces followed by a capital letter (Camel Case => CamelCase)
+    '\s([a-z])': '_\\1', # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+    '\s([0-9])': '.\\1', # replace spaces followed by a number with a dot (item 1 => item.1)
+    settings['disallow']: ''
+}
+transTagValsRegex = re.compile("(%s)" % "|".join(map(re.escape, transTagVals.keys())))
+
+transMetric = {
+    '^\"(.*)\"$': '\\1', # strip leading/trailing quotes
+    '\s([A-Z])': '\\1',  # strip spaces followed by a capital letter (Camel Case => CamelCase)
+    '\s([a-z])': '_\\1', # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+    '\s([0-9])': '.\\1', # replace spaces followed by a number with a dot (item 1 => item.1)
+    #metric = re.sub('^([A-Z])', lambda p: p.group(1).lower(), metric) # lower-case the first letter of the metric, if its not
+    settings['disallow']: '' # final scrub for invalid characters (strip them)
+}
+transMetricRegex = re.compile("(%s)" % "|".join(map(re.escape, transMetric.keys())))
+
 def configCache(mapDb):
     c = mapDb.cursor()
     c.execute('CREATE TABLE IF NOT EXISTS macros (host TEXT, key TEXT, value TEXT, nextUpdate INTEGER, PRIMARY KEY(host, key, value))')
@@ -176,8 +207,8 @@ def findExpiredMacros(mapDb):
             stats['macrosExpired'] += row[1]
         else:
             macros.append('__global__')
-#    if (len(macros) > 0):
-#        logging.info("%d hosts have expired macros that need to be refreshed: %s" % (len(macros), macros));
+    # if (len(macros) > 0):
+    #     logging.info("%d hosts have expired macros that need to be refreshed: %s" % (len(macros), macros));
     return macros
 
 def fetchMacros(mapDb, host):
@@ -188,7 +219,7 @@ def fetchMacros(mapDb, host):
     try:
         c = mapDb.cursor()
         numMacros = c.execute('''SELECT count(nextUpdate) as total, sum(case when nextUpdate <= strftime('%s', 'now') then 1 else 0 end) as expired from macros where host = ?''', (host,)).fetchone()
-        #logging.info("fetchMacros: %s => %s" % (host, numMacros))
+        # logging.info("fetchMacros: %s => %s" % (host, numMacros))
         if (numMacros[0] == 0) or (numMacros[1] > 0):
             refreshHostMacros(mapDb, settings, host);
 
@@ -352,12 +383,10 @@ def fetchItem(mapDb, itemId):
     stats['fetchCount'] += 1
     return item
 
-
 def dumpDict(filename, d):
     f = open(filename, "w+")
     json.dump(d, f, indent=4, sort_keys=True)
     f.close()
-
 
 def fetchDict(filename):
     try:
@@ -368,11 +397,9 @@ def fetchDict(filename):
         d = None
     return d
 
-
 def camelCase(s):
     s = re.sub(disallow, '', s)
     return re.sub(r'(?!^)_([a-zA-Z])', lambda m: m.group(1).upper(), s)
-
 
 def doZabbixStream(mapDb):
     # Set blocking to True if you want to block and wait for the next event at
@@ -443,10 +470,10 @@ def doZabbixStream(mapDb):
                         stats['errors'] += 1
                         exit(1)
 
-#                    except KeyError as e:
-#                        # TODO: Consider https://wiki.python.org/moin/PythonDecoratorLibrary#Retry
-#                        logging.error("ERROR: %s: %s" % (e, itemid))
-#                        stats['errors'] += 1
+                    # except KeyError as e:
+                    #     TODO: Consider https://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+                    #     logging.error("ERROR: %s: %s" % (e, itemid))
+                    #     stats['errors'] += 1
 
                     sys.stdout.flush()
 
@@ -515,7 +542,6 @@ def doZabbixStream(mapDb):
 
     stream.close()
 
-
 def doMacroExpansion(macroMap, item_host, item_key):
     match = re.search("\{\$\w+\}", item_key)
     if match:
@@ -532,7 +558,6 @@ def doMacroExpansion(macroMap, item_host, item_key):
                 break;
             match = re.search("\{\$\w+\}", item_key)
 
-
         match = re.search("\{\$\w+\}", item_key)
         if match:
             logging.warn("Unmatched macro found in Zabbix item for host '%s' : %s" % (item_host, match[0]))
@@ -540,13 +565,11 @@ def doMacroExpansion(macroMap, item_host, item_key):
 
     return item_key
 
-
 def isNumber(n):
     try:
         return float(n)
     except ValueError:
         return False
-
 
 def expandParameters(stringIn, paramMap, context=''):
     # first check to see if there are any macros
@@ -567,7 +590,6 @@ def expandParameters(stringIn, paramMap, context=''):
 
     return stringIn
 
-
 def argParser_default(match, config):
     logging.debug("defaultParser: [ match: %s ]" % (match.groups(),))
 
@@ -586,22 +608,21 @@ def argParser_default(match, config):
     logging.debug("argParser_default: %s" % key)
     return key
 
-
 def argParser_index(paramStr, config, match):
-#                'argParser': 'index', # which parser to use for this item's parameters
-#                'flags': { # parameters to pass to the argParder
-#                        'csv-dialect': {
-#                            'delimiter': ',', # the a delimiter pattern for parsing the args into columns
-#                            'quotechar': ''', # the a delimiter pattern for parsing the args into columns
-#                            'doublequote': True,
-#                            'escapechar': '//',
-#                            'skipinitialspace': False,
-#                            'strict': False,
-#                         },
-#                        'parameterPrefix': 'arg', # a string prepended to names. If namedParameters is not specified, this is prefixed on the index: ie, 'arg' = ['arg1', 'arg2', 'arg3', ...]
-#                        'namedParameters': ['type','device','path'] # an array of names that are matched to the index of the parameter, if not specified parameters are referenced by index {1}, which can be confusing between the top-level parser and this one
-#                        'expandParameters': True # will add all parsed parameters to the tag list (otherwise, tags must be explicitely specified)
-#                    }
+  #  'argParser': 'index', # which parser to use for this item's parameters
+  #  'flags': { # parameters to pass to the argParder
+  #      'csv-dialect': {
+  #          'delimiter': ',', # the a delimiter pattern for parsing the args into columns
+  #          'quotechar': ''', # the a delimiter pattern for parsing the args into columns
+  #          'doublequote': True,
+  #          'escapechar': '//',
+  #          'skipinitialspace': False,
+  #          'strict': False,
+  #      },
+  #      'parameterPrefix': 'arg', # a string prepended to names. If namedParameters is not specified, this is prefixed on the index: ie, 'arg' = ['arg1', 'arg2', 'arg3', ...]
+  #      'namedParameters': ['type','device','path'] # an array of names that are matched to the index of the parameter, if not specified parameters are referenced by index {1}, which can be confusing between the top-level parser and this one
+  #      'expandParameters': True # will add all parsed parameters to the tag list (otherwise, tags must be explicitely specified)
+  #  }
 
     logging.debug("indexParser: [ paramStr: %s ]  [ match: %s ]" % (paramStr, (match.groups(),)))
     key = False
@@ -657,20 +678,20 @@ def argParser_index(paramStr, config, match):
     return key
 
 def argParser_named(paramStr, config, match):
-#                'argParser': 'named', # which parser to use for this item's parameters
-#                'flags': { # parameters to pass to the argParder
-#                        'csv-dialect': {
-#                            'delimiter': ',', # the a delimiter pattern for parsing the args into columns
-#                            'quotechar': ''', # the a delimiter pattern for parsing the args into columns
-#                            'doublequote': True,
-#                            'escapechar': '//',
-#                            'skipinitialspace': False,
-#                            'strict': False,
-#                         },
-#                        'keyValyeSplitExpression': '=', # a regex expression passed to regex.split() that is used to split the named pairs into key and value; defaults to '='
-#                        'parameterPrefix': '', # a string prepended to all names, ie, 'tag.' = 'tag.foo', 'tag.bar', etc
-#                        'expandParameters': True # will add all parsed parameters to the tag list (otherwise, tags must be explicitely specified)
-#                    }
+  #  'argParser': 'named', # which parser to use for this item's parameters
+  #  'flags': { # parameters to pass to the argParder
+  #      'csv-dialect': {
+  #          'delimiter': ',', # the a delimiter pattern for parsing the args into columns
+  #          'quotechar': ''', # the a delimiter pattern for parsing the args into columns
+  #          'doublequote': True,
+  #          'escapechar': '//',
+  #          'skipinitialspace': False,
+  #          'strict': False,
+  #      },
+  #      'keyValyeSplitExpression': '=', # a regex expression passed to regex.split() that is used to split the named pairs into key and value; defaults to '='
+  #      'parameterPrefix': '', # a string prepended to all names, ie, 'tag.' = 'tag.foo', 'tag.bar', etc
+  #      'expandParameters': True # will add all parsed parameters to the tag list (otherwise, tags must be explicitely specified)
+  #  }
 
     logging.debug("namedParser: [ paramStr: %s ]  [ match: %s ]" % (paramStr, (match.groups(),)))
     key = False
@@ -724,15 +745,14 @@ def argParser_named(paramStr, config, match):
     logging.debug("argParser_named: %s" % key)
     return key
 
-
 def argParser_jmx(paramStr, config, match):
-#                'argParser': 'jmx', # which parser to use for this item's parameters
-#                'flags': { # parameters to pass to the argParder
-#                        'splitParameters': if True, attempt to split each the jmx args into key-value parameters?  if True, when use the splitExpression below
-#                        'splitExpression': ',', # a regex expression passed to regex.split() that is used to split the parameters; defaults to ','
-#                        'paramPrefix': 'jmx', # the name used to store the parameters, ie, 'jmx'.  Parameters are then expanded using {jmx[index]} or {jmx.name}
-#                        'namedParameters': True
-#                    }
+  #  'argParser': 'jmx', # which parser to use for this item's parameters
+  #  'flags': { # parameters to pass to the argParder
+  #      'splitParameters': if True, attempt to split each the jmx args into key-value parameters?  if True, when use the splitExpression below
+  #      'splitExpression': ',', # a regex expression passed to regex.split() that is used to split the parameters; defaults to ','
+  #      'paramPrefix': 'jmx', # the name used to store the parameters, ie, 'jmx'.  Parameters are then expanded using {jmx[index]} or {jmx.name}
+  #      'namedParameters': True
+  #  }
 
     logging.debug("jmxParser: [ paramStr: %s ]  [ match: %s ]" % (paramStr, (match.groups(),)))
     key = False
@@ -797,18 +817,22 @@ def sanitizeTags(tags):
     try:
         for (tk, tv) in tags.items():
             del tags[tk]
-            tk = re.sub('^\"(.*)\"$', '\\1', tk)  # strip leading/trailing quotes
-            tk = re.sub('\s([A-Z])', '\\1', tk)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
-            tk = re.sub('\s([a-z])', '_\\1', tk)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
-            tk = re.sub('\s([0-9])', '.\\1', tk)   # replace spaces followed by a number with a dot (item 1 => item.1)
-            tk = re.sub('^([A-Z])', lambda p: p.group(1).lower(), tk) # lower-case the first letter of the tag key, if its not
-            tk = re.sub(disallow, '', tk)
 
-            tv = re.sub('^\"(.*)\"$', '\\1', tv)  # strip leading/trailing quotes
-            tv = re.sub('\s([A-Z])', '\\1', tv)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
-            tv = re.sub('\s([a-z])', '_\\1', tv)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
-            tv = re.sub('\s([0-9])', '.\\1', tv)   # replace spaces followed by a number with a dot (item 1 => item.1)
-            tv = re.sub(disallow, '', tv)
+            tk = transTagKeysRegex.sub(lambda mo: transTagKeys[mo.string[mo.start():mo.end()]], tk)
+            tv = transTagValsRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], tk)
+
+#            tk = re.sub('^\"(.*)\"$', '\\1', tk)  # strip leading/trailing quotes
+#            tk = re.sub('\s([A-Z])', '\\1', tk)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
+#            tk = re.sub('\s([a-z])', '_\\1', tk)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+#            tk = re.sub('\s([0-9])', '.\\1', tk)   # replace spaces followed by a number with a dot (item 1 => item.1)
+#            tk = re.sub('^([A-Z])', lambda p: p.group(1).lower(), tk) # lower-case the first letter of the tag key, if its not
+#            tk = re.sub(disallow, '', tk)
+
+#            tv = re.sub('^\"(.*)\"$', '\\1', tv)  # strip leading/trailing quotes
+#            tv = re.sub('\s([A-Z])', '\\1', tv)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
+#            tv = re.sub('\s([a-z])', '_\\1', tv)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+#            tv = re.sub('\s([0-9])', '.\\1', tv)   # replace spaces followed by a number with a dot (item 1 => item.1)
+#            tv = re.sub(disallow, '', tv)
 
             tags[tk] = tv
         return tags
@@ -818,18 +842,18 @@ def sanitizeTags(tags):
 def sanitizeMetric(metric):
     metricIn = metric
     try:
-        metric = re.sub('^\"(.*)\"$', '\\1', metric)  # strip leading/trailing quotes
-        metric = re.sub('\s([A-Z])', '\\1', metric)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
-        metric = re.sub('\s([a-z])', '_\\1', metric)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
-        metric = re.sub('\s([0-9])', '.\\1', metric)   # replace spaces followed by a number with a dot (item 1 => item.1)
-        #metric = re.sub('^([A-Z])', lambda p: p.group(1).lower(), metric) # lower-case the first letter of the metric, if its not
-        metric = re.sub(disallow, '', metric) # final scrub for invalid characters (strip them)
+        metric = transMetricRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], metric)
+#        metric = re.sub('^\"(.*)\"$', '\\1', metric)  # strip leading/trailing quotes
+#        metric = re.sub('\s([A-Z])', '\\1', metric)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
+#        metric = re.sub('\s([a-z])', '_\\1', metric)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+#        metric = re.sub('\s([0-9])', '.\\1', metric)   # replace spaces followed by a number with a dot (item 1 => item.1)
+#        #metric = re.sub('^([A-Z])', lambda p: p.group(1).lower(), metric) # lower-case the first letter of the metric, if its not
+#        metric = re.sub(disallow, '', metric) # final scrub for invalid characters (strip them)
         if metric != metricIn:
             logging.debug("sanitizeMetric [ %s ] => %s" % (metricIn, metric))
         return metric
     except Exception as e:
         logging.error('ERROR Sanitizing Metric: %s : %s' % (e, metric))
-
 
 availableParsers = dict((key, value) for key,value in globals().iteritems() if key.startswith('argParser'))
 
@@ -863,7 +887,6 @@ def parseZabbixKey(item_key, itemMappings):
     logging.error('Unable to match key from zabbix: %s' % (item_key))
     return False
 
-
 def main():
     utils.drop_privileges()
     if BinLogStreamReader is None:
@@ -875,16 +898,15 @@ def main():
 
     logging.info("Starting zabbix-bridge....")
     mapDb = sqlite3.connect("/tmp/zabbixMap.sqlite")
-#    mapDb = sqlite3.connect(":memory:")
+    # mapDb = sqlite3.connect(":memory:")
     mapDb.isolation_level = 'EXCLUSIVE'
     configCache(mapDb)
-#    refreshAllMacros(mapDb, settings);
+    # refreshAllMacros(mapDb, settings);
     while True:
         cProfile.runctx('doZabbixStream(mapDb)', globals(), {'mapDb': mapDb}, '/tmp/zabbix_bridge.profile')
         logging.info("Waiting for stuff to do...")
 
     mapDb.close()
-
 
 if __name__ == "__main__":
     sys.stdin.close()
