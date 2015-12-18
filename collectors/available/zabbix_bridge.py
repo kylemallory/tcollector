@@ -83,9 +83,7 @@ transTagKeys = {
     '^([A-Z])': lambda p: p.group(1).lower(), # lower-case the first letter of the tag key, if its not
     settings['disallow']: ''
 }
-pattern = "(%s)" % "|".join( transTagKeys.keys() )
-logging.info("Sanitize Pattern: %s" % pattern)
-transTagKeysRegex = re.compile(pattern)
+transTagKeysRegex = re.compile("(%s)" % "|".join(map(re.escape, transTagKeys.keys())))
 
 transTagVals = {
     '^\"(.*)\"$': '\\1', # strip leading/trailing quotes
