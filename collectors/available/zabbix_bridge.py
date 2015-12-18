@@ -332,7 +332,7 @@ def fetchItem(mapDb, itemId):
             stats['itemsReadFromCache'] += 1
         elif (row is not None) and (row[4] <= time.time()):
 	    item = refreshItem(mapDb, settings, itemId)
-            logging.info("fetchItem: Requested item [%s] was expired. Refreshing..." % itemId)
+            #logging.info("fetchItem: Requested item [%s] was expired. Refreshing..." % itemId)
         else:
             return None
 
