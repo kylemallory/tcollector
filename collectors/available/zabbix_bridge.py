@@ -817,7 +817,7 @@ def sanitizeTags(tags):
             del tags[tk]
 
             tk = transTagKeysRegex.sub(lambda mo: transTagKeys[mo.string[mo.start():mo.end()]], tk)
-            tv = transTagValsRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], tk)
+            tv = transTagValsRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], tv)
 
 #            tk = re.sub('^\"(.*)\"$', '\\1', tk)  # strip leading/trailing quotes
 #            tk = re.sub('\s([A-Z])', '\\1', tk)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
