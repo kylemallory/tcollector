@@ -365,9 +365,9 @@ def get_settings():
             'passwd': 'ReplicateZabbix',
             'db': 'zabbix'
         },
-        'loglevel': 'DEBUG',
+        'loglevel': 'INFO',
         'logfile': '/var/log/zabbix_collector.log',
-        'slaveid': 21,                    # Slave identifier, it should be unique.
+        'slaveid': 31,                    # Slave identifier, it should be unique.
         'disallow': '[^a-zA-Z0-9\-_\.\/]', # Regex of characters to replace with _.
         'macroRefreshInterval': 7200,       # How often (seconds) to reload macros from Zabbix (fast & few)   2 hour
         'itemRefreshInterval': 86400,      # How often (seconds) to reload itemid, hostmap from Zabbix (many and slow)   24 hours

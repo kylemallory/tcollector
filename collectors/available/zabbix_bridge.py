@@ -530,18 +530,23 @@ def argParser_index(paramStr, config, match):
     for row in csv.reader([paramStr], dialect='zabbix1', **dialect_overrides):
         try:
             for (idx, param) in enumerate(row):
-                if parameterNames is not None:
-                    paramName = '%s%s' % (paramPrefix, parameterNames[idx])
-                    if not param or param == '':
-                        param = defaultValues[paramName]
-                    logging.debug("indexParser: {%s} => %s" % (paramName, param))
-                    args[paramName] = param
-                elif paramsToTags:
-                    logging.debug("indexParser: {%s%s} => %s" % (paramPrefix, idx+1, param))
-                    args['%s%s' % (paramPrefix, idx+1)] = param
-                else:
-                    logging.debug("indexParser: {%s} => %s" % (idx+1, param))
-                    args[idx+1] = param
+                paramName = '<unknown>'
+                try:
+                    if parameterNames is not None:
+                        paramName = '%s%s' % (paramPrefix, parameterNames[idx])
+                        if paramName in defaultValues and (not param or param == ''):
+                            param = defaultValues[paramName]
+                        logging.debug("indexParser(named): {%s} => %s" % (paramName, param))
+                        args[paramName] = param
+                    elif paramsToTags:
+                        paramName = '%s%s' % (paramPrefix, idx+1)
+                        logging.debug("indexParser(unnamed): {%s} => %s" % (paramName, param))
+                        args[paramName] = param
+                    else:
+                        logging.debug("indexParser(indexed): {%s} => %s" % (idx+1, param))
+                        args[idx+1] = param
+                except Exception as e:
+                    logging.error("argParser_index: Error during parameter indexing: %s :: [%s] '%s' %s" % (e, idx, paramName, param))
 
             key = {}
             tags = {}
@@ -562,9 +567,10 @@ def argParser_index(paramStr, config, match):
             key['metric'] = match.expandf(expandParameters(config['metric'], args, 'index: '+paramStr))
 
         except Exception as e:
-            logging.error("argParser_index: %s :: %s" % (e, row))
+            logging.error("argParser_index: %s :: %s" % (e.strerror, row))
 
-    logging.debug("argParser_index: %s" % key)
+    if key:
+        logging.debug("argParser_index: %s" % key)
     return key
 
 def argParser_named(paramStr, config, match):
@@ -769,7 +775,7 @@ def doZabbixStream(mapDb):
                         lastItemTime = r['clock']
 
                     # drop data points that are more then 15 minutes old (this should keep us current, or at least 15 minutes current)
-                    if (time.time() - r['clock']) > 300:
+                    if (time.time() - r['clock']) > 900:
                         stats['rowsSkipped'] += 1
                         continue
 
@@ -783,6 +789,7 @@ def doZabbixStream(mapDb):
                                 logging.info("Added itemId %s [%s] to item cache." % (itemid, hostItem['_key']))
                             else:
                                 logging.info("Received Zabbix Item ID that couldn't be correlated back to an item in Zabbix: %s" % (itemid))
+                                continue
 
                         if (hostItem is not None) and ('metric' in hostItem):
                             metric = hostItem['metric']
