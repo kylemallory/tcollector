@@ -92,7 +92,9 @@ transTagVals = {
     '\s([0-9])': '.\\1', # replace spaces followed by a number with a dot (item 1 => item.1)
     settings['disallow']: ''
 }
-transTagValsRegex = re.compile("(%s)" % "|".join(map(re.escape, transTagVals.keys())))
+logging.info("sanitize Tag Values: ( %s )" % "|".join( transTagVals.keys() ) )
+transTagValsRegex = re.compile("(%s)" % "|".join( transTagVals.keys() ) )
+#transTagValsRegex = re.compile("(%s)" % "|".join(map(re.escape, transTagVals.keys())))
 
 transMetric = {
     '^\"(.*)\"$': '\\1', # strip leading/trailing quotes
@@ -111,6 +113,48 @@ def configCache(mapDb):
     c.execute('CREATE TABLE IF NOT EXISTS tags   (itemId INTEGER, tagk TEXT, tagv TEXT, UNIQUE(itemId, tagk, tagv))')
     logging.debug("Created (if not exists) zabbix mapping schema...")
     mapDb.commit()
+
+def sanitizeTags(tags):
+    try:
+        for (tk, tv) in tags.items():
+            del tags[tk]
+
+#            tk = transTagKeysRegex.sub(lambda mo: transTagKeys[mo.string[mo.start():mo.end()]], tk)
+#            tv = transTagValsRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], tv)
+
+            tk = re.sub('^\"(.*)\"$', '\\1', tk)  # strip leading/trailing quotes
+            tk = re.sub('\s([A-Z])', '\\1', tk)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
+            tk = re.sub('\s([a-z])', '_\\1', tk)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+            tk = re.sub('\s([0-9])', '.\\1', tk)   # replace spaces followed by a number with a dot (item 1 => item.1)
+            tk = re.sub('^([A-Z])', lambda p: p.group(1).lower(), tk) # lower-case the first letter of the tag key, if its not
+            tk = re.sub(disallow, '', tk)
+
+            tv = re.sub('^\"(.*)\"$', '\\1', tv)  # strip leading/trailing quotes
+            tv = re.sub('\s([A-Z])', '\\1', tv)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
+            tv = re.sub('\s([a-z])', '_\\1', tv)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+            tv = re.sub('\s([0-9])', '.\\1', tv)   # replace spaces followed by a number with a dot (item 1 => item.1)
+            tv = re.sub(disallow, '', tv)
+
+            tags[tk] = tv
+        return tags
+    except Exception as e:
+        logging.error('ERROR Sanitizing Tags: %s : %s' % (e, tags))
+
+def sanitizeMetric(metric):
+    metricIn = metric
+    try:
+#        metric = transMetricRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], metric)
+        metric = re.sub('^\"(.*)\"$', '\\1', metric)  # strip leading/trailing quotes
+        metric = re.sub('\s([A-Z])', '\\1', metric)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
+        metric = re.sub('\s([a-z])', '_\\1', metric)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
+        metric = re.sub('\s([0-9])', '.\\1', metric)   # replace spaces followed by a number with a dot (item 1 => item.1)
+        #metric = re.sub('^([A-Z])', lambda p: p.group(1).lower(), metric) # lower-case the first letter of the metric, if its not
+        metric = re.sub(disallow, '', metric) # final scrub for invalid characters (strip them)
+        if metric != metricIn:
+            logging.debug("sanitizeMetric [ %s ] => %s" % (metricIn, metric))
+        return metric
+    except Exception as e:
+        logging.error('ERROR Sanitizing Metric: %s : %s' % (e, metric))
 
 def writeMacros(mapDb, macros):
     c = mapDb.cursor()
@@ -230,6 +274,29 @@ def fetchMacros(mapDb, host):
 
     return macros
 
+def doMacroExpansion(macroMap, item_host, item_key):
+    match = re.search("\{\$\w+\}", item_key)
+    if match:
+        logging.debug("Doing Macro Expansion: %s : %s" % (item_host, item_key))
+        while match:
+            # process Zabbix macros first -- this ONLY does the incoming item key (the idea being that all tag values later are pulled from the item-key)
+            if match[0] in macroMap:
+                item_key = re.sub(re.escape(match[0]), macroMap[match[0]], item_key);
+                logging.debug("MACRO EXPAND [%s]: %s" % (item_host, item_key));
+            elif match[0] in settings['mappings']['macros']:
+                item_key = re.sub(re.escape(match[0]), settings['mappings']['macros'][match[0]], item_key);
+                logging.debug("GLOBAL MACRO EXPAND: %s [%s]" % (item_key, match[0]));
+            else:
+                break;
+            match = re.search("\{\$\w+\}", item_key)
+
+        match = re.search("\{\$\w+\}", item_key)
+        if match:
+            logging.warn("Unmatched macro found in Zabbix item for host '%s' : %s" % (item_host, match[0]))
+            item_key = None
+
+    return item_key
+
 def storeItems(mapDb, items):
     c = mapDb.cursor()
     for (itemId, item) in items.items():
@@ -324,9 +391,11 @@ def refreshItem(mapDb, settings, itemId):
         refreshedItem['_key'] = item_key
         refreshedItem['_host'] = item_host
         mapItemHost(refreshedItem, item_host)
+        refreshedItem['metric'] = sanitizeMetric(refreshedItem['metric'])
         if 'tags' in refreshedItem:
             if 'host' not in refreshedItem['tags']:
                 refreshedItem['tags']['host'] = item_host # re.sub(disallow, '-', item_host)
+            refreshedItem['tags'] = sanitizeTags(refreshedItem['tags'])
 
     #refreshedItem['tags']['original_host'] = re.sub(disallow, '_', item_host)
     # tags['original_item_key'] = re.sub(disallow, '_', item_key)
@@ -347,227 +416,40 @@ def refreshItem(mapDb, settings, itemId):
 
     return refreshedItem;
 
-def fetchItem(mapDb, itemId):
+def fetchItemFromCache(mapDb, itemId):
     startTime = time.time();
     try:
         c = mapDb.cursor()
         item = {}
         c.execute('''SELECT * FROM items where itemId = ?''', (itemId,))
         row = c.fetchone()
-        if (row is not None) and (row[4] > time.time()):
-            item['_host'] = row[1]
-            item['_key'] = row[2]
-            item['metric'] = row[3]
-            stats['itemsReadFromCache'] += 1
-        elif (row is not None) and (row[4] <= time.time()):
-	    item = refreshItem(mapDb, settings, itemId)
-            #logging.info("fetchItem: Requested item [%s] was expired. Refreshing..." % itemId)
+        if (row is not None):
+            if (row[4] > time.time()):
+                item['_host'] = row[1]
+                item['_key'] = row[2]
+                item['metric'] = row[3]
+                stats['itemsReadFromCache'] += 1
+            else:
+                logging.debug("fetchItemFromCache: Requested item [%s] was expired. Refreshing..." % itemId)
+                item = refreshItem(mapDb, settings, itemId)
         else:
             return None
 
         if item:
-            logging.debug("fetchItem: Loading tags for %s from cache" % (itemId))
+            #logging.debug("fetchItemFromCache: Loading tags for %s from cache" % (itemId))
             tags = {}
             for row in c.execute('''SELECT * FROM tags where itemId = ?''', (itemId,)):
                 tags.update({row[1]: row[2]})
             item['tags'] = tags
-            logging.debug("fetchItem: Loaded tags for %s :: %s" % (itemId, tags))
+            logging.debug("fetchItemFromCache: Loaded tags for %s :: %s" % (itemId, tags))
     except ValueError as e:
         logging.error("%s on item %s" % (e, itemId))
 
     fetchTime = time.time() - startTime;
-    logging.debug("fetchItem: Found %s in cache :: %s (%f secs)" % (itemId, item, fetchTime))
+    logging.debug("fetchItemFromCache: Found %s in cache :: %s (%f secs)" % (itemId, item, fetchTime))
     stats['fetchTime'] += fetchTime
     stats['fetchCount'] += 1
     return item
-
-def dumpDict(filename, d):
-    f = open(filename, "w+")
-    json.dump(d, f, indent=4, sort_keys=True)
-    f.close()
-
-def fetchDict(filename):
-    try:
-        f = open(filename, "r")
-        d = json.load(f)
-        f.close()
-    except:
-        d = None
-    return d
-
-def camelCase(s):
-    s = re.sub(disallow, '', s)
-    return re.sub(r'(?!^)_([a-zA-Z])', lambda m: m.group(1).upper(), s)
-
-def doZabbixStream(mapDb):
-    # Set blocking to True if you want to block and wait for the next event at
-    # the end of the stream
-    stream = BinLogStreamReader(connection_settings=settings['mysql'],
-                                server_id=settings['slaveid'],
-                                only_events=[WriteRowsEvent],
-                                resume_stream=True,
-                                blocking=True)
-
-    lastLogTime = lastAlertTime = startTime = time.time()
-    bestTimeDelta = timeDelta = 0
-    lastItemTime = 0
-    invalidItemId = 0
-    lastBuildCount = 0
-    lastFetchCount = 0
-    lastSkippedCount = 0
-
-    for binlogevent in stream:
-        if binlogevent.schema == settings['mysql']['db']:
-            table = binlogevent.table
-            log_pos = binlogevent.packet.log_pos
-            if table == 'history' or table == 'history_uint':
-                for row in binlogevent.rows:
-                    stats['rowCount'] += 1
-                    stats['received'] += 1
-
-                    r = row['values']
-                    itemid = r['itemid']
-
-                    lastDataTime = time.time()
-                    if r['clock'] > lastItemTime:
-                        lastItemTime = r['clock']
-
-                    # drop data points that are more then 15 minutes old (this should keep us current, or at least 15 minutes current)
-                    if (time.time() - r['clock']) > 300:
-                        stats['rowsSkipped'] += 1
-                        continue
-
-                    hostItem = None;
-                    try:
-                        hostItem = fetchItem(mapDb, itemid);
-                        if not hostItem:
-                            hostItem = refreshItem(mapDb, settings, itemid)
-                            if hostItem:
-                                stats['updated'] += 1
-                                logging.info("Added itemId %s [%s] to item cache." % (itemid, hostItem['_key']))
-                            else:
-                                logging.info("Received Zabbix Item ID that couldn't be correlated back to an item in Zabbix: %s" % (itemid))
-
-                        if (hostItem is not None) and ('metric' in hostItem):
-                            metric = sanitizeMetric(hostItem['metric'])
-                            tags = sanitizeTags(hostItem['tags'])
-
-                            print "%s %d %s" % (metric, r['clock'], r['value']),
-                            for (tagk, tagv) in tags.items():
-                                if (tagv is not None) and (tagv != ''):
-                                    print "%s=%s" % (tagk, tagv),
-                            print ""
-                            stats['sent'] += 1
-                        else:
-                            stats['errors'] += 1
-                            continue
-
-                    except TypeError as e:
-                        logging.error("FATAL: doZabbixStream: %s" % (e))
-                        logging.error( traceback.format_exc() )
-                        stats['errors'] += 1
-                        exit(1)
-
-                    # except KeyError as e:
-                    #     TODO: Consider https://wiki.python.org/moin/PythonDecoratorLibrary#Retry
-                    #     logging.error("ERROR: %s: %s" % (e, itemid))
-                    #     stats['errors'] += 1
-
-                    sys.stdout.flush()
-
-                    # do some metric calculations (and/or logging alerts)
-                    timeDelta = lastDataTime - lastItemTime
-                    if (time.time() - lastAlertTime) > 120:
-                        if timeDelta > 300:
-                            logging.info("Processing %d zabbix rows/sec." % (stats['rowCount'] / (time.time() - lastLogTime)))
-                            logging.warn("Zabbix-collector is %d seconds behind the master db." % timeDelta)
-                            lastAlertTime = time.time();
-
-                if (time.time() - lastDataTime) > 30:
-                    if nextAlertTime < time.time():
-                        logging.warn("Last zabbix data was %d seconds ago...  is Zabbix running???" % (time.time() - lastDataTime))
-                        nextAlertTime = time.time() + 30
-
-        # write zabbix_collector metric to opentsdb
-        lastLogInterval = time.time() - lastLogTime
-        if lastLogInterval > 15:
-            itemsPerSec = stats['rowCount'] / lastLogInterval
-            itemCacheStats = getItemCacheStatus(mapDb);
-            logging.info("Zabbix Stats: %d total cached items, %d (%d%%) active, %d expired. %d rows processed in %s seconds.  %d items/sec. %d seconds behind." % (itemCacheStats['total'], itemCacheStats['active'], itemCacheStats['apogee'] * 100, itemCacheStats['expired'], stats['rowCount'], lastLogInterval, itemsPerSec, timeDelta));
-            # print "tcollector.items.keyErrors %d %f collector=zabbix host=%s\n" % (time.time(), invalidItemId, socket.getfqdn())
-            # print "tcollector.zabbix_bridge.items.cache.expired %d %f collector=zabbix\n" % (time.time(), stats['itemsExpired'])
-            print "tcollector.zabbix_bridge.items.cache.apogee %d %f collector=zabbix" % (time.time(), itemCacheStats['apogee'])
-            for (host,n) in itemCacheStats['itemsPerHost'].items():
-                print "tcollector.zabbix_bridge.items.cache.count.per_host %d %f collector=zabbix item_host=%s\n" % (time.time(), n, sanitizeMetric(host))
-            print "tcollector.zabbix_bridge.items.cache.count.expired %d %f collector=zabbix" % (time.time(), itemCacheStats['expired'])
-            print "tcollector.zabbix_bridge.items.cache.count.total %d %f collector=zabbix" % (time.time(), itemCacheStats['total'])
-            print "tcollector.zabbix_bridge.items.cache.count.reads %d %f collector=zabbix\n" % (time.time(), stats['itemsReadFromCache'])
-            print "tcollector.zabbix_bridge.items.cache.count.writes %d %f collector=zabbix\n" % (time.time(), stats['itemsWrittenToCache'])
-            if stats['buildCount'] > 0:
-                buildCount = stats['buildCount'] - lastBuildCount
-                buildTime = stats['buildTime'] / stats['buildCount']
-                buildRate = (buildCount * buildTime) / lastLogInterval
-                print "tcollector.zabbix_bridge.items.cache.time.writes %d %f collector=zabbix\n" % (time.time(), buildTime)
-                print "tcollector.zabbix_bridge.items.cache.throughput.writes %d %f collector=zabbix\n" % (time.time(), buildRate)
-                lastBuildCount = stats['buildCount']
-            if stats['fetchCount'] > 0:
-                fetchCount = stats['fetchCount'] - lastFetchCount
-                fetchTime = stats['fetchTime'] / stats['fetchCount']
-                fetchRate = (fetchCount * fetchTime) / lastLogInterval
-                print "tcollector.zabbix_bridge.items.cache.time.reads %d %f collector=zabbix\n" % (time.time(), fetchTime)
-                print "tcollector.zabbix_bridge.items.cache.throughput.reads %d %f collector=zabbix\n" % (time.time(), fetchRate)
-                lastFetchCount = stats['fetchCount']
-
-            for row in mapDb.cursor().execute('SELECT count(distinct(host)) FROM macros'):
-                print "tcollector.zabbix_bridge.macros.refresh.hosts %d %f collector=zabbix\n" % (time.time(), row[0])
-            for row in mapDb.cursor().execute('SELECT distinct(host), count(host) FROM macros GROUP BY host'):
-                print "tcollector.zabbix_bridge.macros.count.per_host %d %f collector=zabbix macro_host=%s\n" % (time.time(), row[1], row[0])
-            print "tcollector.zabbix_bridge.macros.expired %d %f collector=zabbix\n" % (time.time(), stats['macrosExpired'])
-            print "tcollector.zabbix_bridge.macros.writtenToCache %d %f collector=zabbix\n" % (time.time(), stats['macrosWrittenToCache'])
-            print "tcollector.zabbix_bridge.macros.readFromCache %d %f collector=zabbix\n" % (time.time(), stats['macrosReadFromCache'])
-
-            print "tcollector.items.errors %d %f collector=zabbix\n" % (time.time(), stats['errors'])
-            print "tcollector.items.sent %d %f collector=zabbix\n" % (time.time(), stats['sent'])
-            print "tcollector.items.received %d %f collector=zabbix\n" % (time.time(), stats['received'])
-            print "tcollector.items.skipped %d %f collector=zabbix\n" % (time.time(), stats['rowsSkipped'])
-            print "tcollector.items.updated %d %f collector=zabbix\n" % (time.time(), stats['updated'])
-            print "tcollector.items.errors %d %f collector=zabbix\n" % (time.time(), stats['errors'])
-            print "tcollector.items.sent %d %f collector=zabbix\n" % (time.time(), stats['sent'])
-            print "tcollector.items.perSecond %d %f collector=zabbix\n" % (time.time(), itemsPerSec)
-            print "tcollector.collector.delay %d %f collector=zabbix\n" % (time.time(), timeDelta)
-            stats['rowCount'] = 0
-            lastLogTime = time.time()
-
-    stream.close()
-
-def doMacroExpansion(macroMap, item_host, item_key):
-    match = re.search("\{\$\w+\}", item_key)
-    if match:
-        logging.debug("Doing Macro Expansion: %s : %s" % (item_host, item_key))
-        while match:
-            # process Zabbix macros first -- this ONLY does the incoming item key (the idea being that all tag values later are pulled from the item-key)
-            if match[0] in macroMap:
-                item_key = re.sub(re.escape(match[0]), macroMap[match[0]], item_key);
-                logging.debug("MACRO EXPAND [%s]: %s" % (item_host, item_key));
-            elif match[0] in settings['mappings']['macros']:
-                item_key = re.sub(re.escape(match[0]), settings['mappings']['macros'][match[0]], item_key);
-                logging.debug("GLOBAL MACRO EXPAND: %s [%s]" % (item_key, match[0]));
-            else:
-                break;
-            match = re.search("\{\$\w+\}", item_key)
-
-        match = re.search("\{\$\w+\}", item_key)
-        if match:
-            logging.warn("Unmatched macro found in Zabbix item for host '%s' : %s" % (item_host, match[0]))
-            item_key = None
-
-    return item_key
-
-def isNumber(n):
-    try:
-        return float(n)
-    except ValueError:
-        return False
 
 def expandParameters(stringIn, paramMap, context=''):
     # first check to see if there are any macros
@@ -630,6 +512,7 @@ def argParser_index(paramStr, config, match):
     dialect_overrides = {}
     paramsToTags = False
     parameterNames = None
+    defaultValues = {}
     if 'flags' in config:
         flags = config['flags']
         if 'parameterPrefix' in flags:
@@ -640,14 +523,19 @@ def argParser_index(paramStr, config, match):
             paramsToTags = flags['expandParameters']
         if 'namedParameters' in flags:
             parameterNames = flags['namedParameters']
+        if 'defaults' in flags:
+            defaultValues = flags['defaults']
 
     args = {}
     for row in csv.reader([paramStr], dialect='zabbix1', **dialect_overrides):
         try:
             for (idx, param) in enumerate(row):
                 if parameterNames is not None:
-                    logging.debug("indexParser: {%s%s} => %s" % (paramPrefix, parameterNames[idx], param))
-                    args['%s%s' % (paramPrefix, parameterNames[idx])] = param
+                    paramName = '%s%s' % (paramPrefix, parameterNames[idx])
+                    if not param or param == '':
+                        param = defaultValues[paramName]
+                    logging.debug("indexParser: {%s} => %s" % (paramName, param))
+                    args[paramName] = param
                 elif paramsToTags:
                     logging.debug("indexParser: {%s%s} => %s" % (paramPrefix, idx+1, param))
                     args['%s%s' % (paramPrefix, idx+1)] = param
@@ -665,7 +553,11 @@ def argParser_index(paramStr, config, match):
                     k = match.expandf(expandParameters(k, args, 'index: '+paramStr))
                     v = match.expandf(expandParameters(v, args, 'index: '+paramStr))
                     if k and v:
+                        if v == '':
+                            v = defaultValues[k]
                         tags[k] = v
+                    elif k and defaultValues:
+                        tags[k] = defaultValues[k]
             key['tags'] = tags
             key['metric'] = match.expandf(expandParameters(config['metric'], args, 'index: '+paramStr))
 
@@ -811,48 +703,6 @@ def argParser_jmx(paramStr, config, match):
     logging.debug("argParser_jmx: %s" % key)
     return key
 
-def sanitizeTags(tags):
-    try:
-        for (tk, tv) in tags.items():
-            del tags[tk]
-
-            tk = transTagKeysRegex.sub(lambda mo: transTagKeys[mo.string[mo.start():mo.end()]], tk)
-            tv = transTagValsRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], tv)
-
-#            tk = re.sub('^\"(.*)\"$', '\\1', tk)  # strip leading/trailing quotes
-#            tk = re.sub('\s([A-Z])', '\\1', tk)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
-#            tk = re.sub('\s([a-z])', '_\\1', tk)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
-#            tk = re.sub('\s([0-9])', '.\\1', tk)   # replace spaces followed by a number with a dot (item 1 => item.1)
-#            tk = re.sub('^([A-Z])', lambda p: p.group(1).lower(), tk) # lower-case the first letter of the tag key, if its not
-#            tk = re.sub(disallow, '', tk)
-
-#            tv = re.sub('^\"(.*)\"$', '\\1', tv)  # strip leading/trailing quotes
-#            tv = re.sub('\s([A-Z])', '\\1', tv)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
-#            tv = re.sub('\s([a-z])', '_\\1', tv)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
-#            tv = re.sub('\s([0-9])', '.\\1', tv)   # replace spaces followed by a number with a dot (item 1 => item.1)
-#            tv = re.sub(disallow, '', tv)
-
-            tags[tk] = tv
-        return tags
-    except Exception as e:
-        logging.error('ERROR Sanitizing Tags: %s : %s' % (e, tags))
-
-def sanitizeMetric(metric):
-    metricIn = metric
-    try:
-        metric = transMetricRegex.sub(lambda mo: transTagVals[mo.string[mo.start():mo.end()]], metric)
-#        metric = re.sub('^\"(.*)\"$', '\\1', metric)  # strip leading/trailing quotes
-#        metric = re.sub('\s([A-Z])', '\\1', metric)    # strip spaces followed by a capital letter (Camel Case => CamelCase)
-#        metric = re.sub('\s([a-z])', '_\\1', metric)   # replace spaces followed by a lower-case letter with an underscore (Camel case => camel_case)
-#        metric = re.sub('\s([0-9])', '.\\1', metric)   # replace spaces followed by a number with a dot (item 1 => item.1)
-#        #metric = re.sub('^([A-Z])', lambda p: p.group(1).lower(), metric) # lower-case the first letter of the metric, if its not
-#        metric = re.sub(disallow, '', metric) # final scrub for invalid characters (strip them)
-        if metric != metricIn:
-            logging.debug("sanitizeMetric [ %s ] => %s" % (metricIn, metric))
-        return metric
-    except Exception as e:
-        logging.error('ERROR Sanitizing Metric: %s : %s' % (e, metric))
-
 availableParsers = dict((key, value) for key,value in globals().iteritems() if key.startswith('argParser'))
 
 def parseZabbixKey(item_key, itemMappings):
@@ -884,6 +734,147 @@ def parseZabbixKey(item_key, itemMappings):
 
     logging.error('Unable to match key from zabbix: %s' % (item_key))
     return False
+
+def doZabbixStream(mapDb):
+    # Set blocking to True if you want to block and wait for the next event at
+    # the end of the stream
+    stream = BinLogStreamReader(connection_settings=settings['mysql'],
+                                server_id=settings['slaveid'],
+                                only_events=[WriteRowsEvent],
+                                resume_stream=True,
+                                blocking=True)
+
+    lastLogTime = lastAlertTime = startTime = time.time()
+    bestTimeDelta = timeDelta = 0
+    lastItemTime = 0
+    invalidItemId = 0
+    lastBuildCount = 0
+    lastFetchCount = 0
+    lastSkippedCount = 0
+
+    for binlogevent in stream:
+        if binlogevent.schema == settings['mysql']['db']:
+            table = binlogevent.table
+            log_pos = binlogevent.packet.log_pos
+            if table == 'history' or table == 'history_uint':
+                for row in binlogevent.rows:
+                    stats['rowCount'] += 1
+                    stats['received'] += 1
+
+                    r = row['values']
+                    itemid = r['itemid']
+
+                    lastDataTime = time.time()
+                    if r['clock'] > lastItemTime:
+                        lastItemTime = r['clock']
+
+                    # drop data points that are more then 15 minutes old (this should keep us current, or at least 15 minutes current)
+                    if (time.time() - r['clock']) > 300:
+                        stats['rowsSkipped'] += 1
+                        continue
+
+                    hostItem = None;
+                    try:
+                        hostItem = fetchItemFromCache(mapDb, itemid);
+                        if not hostItem:
+                            hostItem = refreshItem(mapDb, settings, itemid)
+                            if hostItem:
+                                stats['updated'] += 1
+                                logging.info("Added itemId %s [%s] to item cache." % (itemid, hostItem['_key']))
+                            else:
+                                logging.info("Received Zabbix Item ID that couldn't be correlated back to an item in Zabbix: %s" % (itemid))
+
+                        if (hostItem is not None) and ('metric' in hostItem):
+                            metric = hostItem['metric']
+                            tags = hostItem['tags']
+
+                            print "%s %d %s" % (metric, r['clock'], r['value']),
+                            for (tagk, tagv) in tags.items():
+                                if (tagv is not None) and (tagv != ''):
+                                    print "%s=%s" % (tagk, tagv),
+                            print ""
+                            stats['sent'] += 1
+                        else:
+                            stats['errors'] += 1
+                            continue
+
+                    except TypeError as e:
+                        logging.error("FATAL: doZabbixStream: %s" % (e))
+                        logging.error( traceback.format_exc() )
+                        stats['errors'] += 1
+                        exit(1)
+
+                    # except KeyError as e:
+                    #     TODO: Consider https://wiki.python.org/moin/PythonDecoratorLibrary#Retry
+                    #     logging.error("ERROR: %s: %s" % (e, itemid))
+                    #     stats['errors'] += 1
+
+                    sys.stdout.flush()
+
+                    # do some metric calculations (and/or logging alerts)
+                    timeDelta = lastDataTime - lastItemTime
+                    if (time.time() - lastAlertTime) > 120:
+                        if timeDelta > 300:
+                            logging.info("Processing %d zabbix rows/sec." % (stats['rowCount'] / (time.time() - lastLogTime)))
+                            logging.warn("Zabbix-collector is %d seconds behind the master db." % timeDelta)
+                            lastAlertTime = time.time();
+
+                if (time.time() - lastDataTime) > 30:
+                    if nextAlertTime < time.time():
+                        logging.warn("Last zabbix data was %d seconds ago...  is Zabbix running???" % (time.time() - lastDataTime))
+                        nextAlertTime = time.time() + 30
+
+        # write zabbix_collector metric to opentsdb
+        lastLogInterval = time.time() - lastLogTime
+        if lastLogInterval > 15:
+            itemsPerSec = stats['rowCount'] / lastLogInterval
+            itemCacheStats = getItemCacheStatus(mapDb);
+            logging.info("Zabbix Stats: %d total cached items, %d (%d%%) active, %d expired. %d rows processed in %s seconds.  %d items/sec. %d seconds behind." % (itemCacheStats['total'], itemCacheStats['active'], itemCacheStats['apogee'] * 100, itemCacheStats['expired'], stats['rowCount'], lastLogInterval, itemsPerSec, timeDelta));
+            # print "tcollector.items.keyErrors %d %f collector=zabbix host=%s\n" % (time.time(), invalidItemId, socket.getfqdn())
+            # print "tcollector.zabbix_bridge.items.cache.expired %d %f collector=zabbix\n" % (time.time(), stats['itemsExpired'])
+            print "tcollector.zabbix_bridge.items.cache.apogee %d %f collector=zabbix" % (time.time(), itemCacheStats['apogee'])
+            for (host,n) in itemCacheStats['itemsPerHost'].items():
+                print "tcollector.zabbix_bridge.items.cache.count.per_host %d %f collector=zabbix item_host=%s\n" % (time.time(), n, sanitizeMetric(host))
+            print "tcollector.zabbix_bridge.items.cache.count.expired %d %f collector=zabbix" % (time.time(), itemCacheStats['expired'])
+            print "tcollector.zabbix_bridge.items.cache.count.total %d %f collector=zabbix" % (time.time(), itemCacheStats['total'])
+            print "tcollector.zabbix_bridge.items.cache.count.reads %d %f collector=zabbix\n" % (time.time(), stats['itemsReadFromCache'])
+            print "tcollector.zabbix_bridge.items.cache.count.writes %d %f collector=zabbix\n" % (time.time(), stats['itemsWrittenToCache'])
+            if stats['buildCount'] > 0:
+                buildCount = stats['buildCount'] - lastBuildCount
+                buildTime = stats['buildTime'] / stats['buildCount']
+                buildRate = (buildCount * buildTime) / lastLogInterval
+                print "tcollector.zabbix_bridge.items.cache.time.writes %d %f collector=zabbix\n" % (time.time(), buildTime)
+                print "tcollector.zabbix_bridge.items.cache.throughput.writes %d %f collector=zabbix\n" % (time.time(), buildRate)
+                lastBuildCount = stats['buildCount']
+            if stats['fetchCount'] > 0:
+                fetchCount = stats['fetchCount'] - lastFetchCount
+                fetchTime = stats['fetchTime'] / stats['fetchCount']
+                fetchRate = (fetchCount * fetchTime) / lastLogInterval
+                print "tcollector.zabbix_bridge.items.cache.time.reads %d %f collector=zabbix\n" % (time.time(), fetchTime)
+                print "tcollector.zabbix_bridge.items.cache.throughput.reads %d %f collector=zabbix\n" % (time.time(), fetchRate)
+                lastFetchCount = stats['fetchCount']
+
+            for row in mapDb.cursor().execute('SELECT count(distinct(host)) FROM macros'):
+                print "tcollector.zabbix_bridge.macros.refresh.hosts %d %f collector=zabbix\n" % (time.time(), row[0])
+            for row in mapDb.cursor().execute('SELECT distinct(host), count(host) FROM macros GROUP BY host'):
+                print "tcollector.zabbix_bridge.macros.count.per_host %d %f collector=zabbix macro_host=%s\n" % (time.time(), row[1], row[0])
+            print "tcollector.zabbix_bridge.macros.expired %d %f collector=zabbix\n" % (time.time(), stats['macrosExpired'])
+            print "tcollector.zabbix_bridge.macros.writtenToCache %d %f collector=zabbix\n" % (time.time(), stats['macrosWrittenToCache'])
+            print "tcollector.zabbix_bridge.macros.readFromCache %d %f collector=zabbix\n" % (time.time(), stats['macrosReadFromCache'])
+
+            print "tcollector.items.errors %d %f collector=zabbix\n" % (time.time(), stats['errors'])
+            print "tcollector.items.sent %d %f collector=zabbix\n" % (time.time(), stats['sent'])
+            print "tcollector.items.received %d %f collector=zabbix\n" % (time.time(), stats['received'])
+            print "tcollector.items.skipped %d %f collector=zabbix\n" % (time.time(), stats['rowsSkipped'])
+            print "tcollector.items.updated %d %f collector=zabbix\n" % (time.time(), stats['updated'])
+            print "tcollector.items.errors %d %f collector=zabbix\n" % (time.time(), stats['errors'])
+            print "tcollector.items.sent %d %f collector=zabbix\n" % (time.time(), stats['sent'])
+            print "tcollector.items.perSecond %d %f collector=zabbix\n" % (time.time(), itemsPerSec)
+            print "tcollector.collector.delay %d %f collector=zabbix\n" % (time.time(), timeDelta)
+            stats['rowCount'] = 0
+            lastLogTime = time.time()
+
+    stream.close()
 
 def main():
     utils.drop_privileges()

@@ -62,14 +62,14 @@ def get_settings():
 
 	# haproxy.trap["instance=haproxy-external-trust,end=BACKEND,role=entity-search-xapi::haproxy.bck"]
         ('haproxy\.trap\[\"(.*)::(.*)\"\]', {
+            'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters
             'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
-            'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters 
             'flags': { 'expandParameters': True },
             'metric': '{2}',
         }),
         ('redis\.trap\[(.*)::(.*)\]', {
-            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'argParser': 'named', # which parser to use for this item's args; 'named' parser expects 2 parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': { # parameters to pass to the argParser
                 'expandParameters': True, # whether to create tags from named query params:  Ie, "type=Foo,name=bar" expands tags: type=Foo and name=bar
             },
@@ -79,8 +79,8 @@ def get_settings():
         ('jmx(\[([^\]]*)\])', {
             #  jmx['domain:query','attribute']
             # 'domain', 'query', 'attribute' are always placed into the parameter map, but are only ever explicitly expanded into tags
-            'argString': '{2}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'argParser': 'jmx', # which parser to use for this item's args; 'jmx' parser expects 2 parameters, the first is a query, comprised of a list of name-value pairs, with an optional, proceeding 'domain'; the second is an 'attribute' name.
+            'argString': '{2}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': { # parameters to pass to the argParser
                 'expandParameters': True, # whether to create tags from jmx MBean query params:  Ie, "domain:type=Foo,name=bar" expands tags: type=Foo and name=bar
                 'parameterPrefix': 'jmx.' # a prefix to prepend on all parameters parsed by the parser, ie, 'jmx.'.  Parameters are then expanded using {jmx.type}
@@ -155,6 +155,7 @@ def get_settings():
         }),
         ('icmpping\[([^\]]*)\]', {
             'argParser': 'index',
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
                 'expandParameters': True
@@ -163,6 +164,7 @@ def get_settings():
         }),
         ('icmppingsec\[([^\]]*)\]', {
             'argParser': 'index',
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
                 'expandParameters': True
@@ -171,6 +173,7 @@ def get_settings():
         }),
         ('icmppingloss\[([^\]]*)\]', {
             'argParser': 'index',
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['target','packet-count','packet-interval','packet-size','timeout','mode'],
                 'expandParameters': True
@@ -188,6 +191,7 @@ def get_settings():
         }),
         ('log\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['file','regex','encoding','maxlines','mode'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -196,6 +200,7 @@ def get_settings():
         }),
         ('logrt\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['file','regex','encoding','maxlines','mode'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -220,6 +225,7 @@ def get_settings():
         }),
         ('net\.(tcp|udp)\.listen\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['port'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -228,6 +234,7 @@ def get_settings():
         }),
         ('net\.tcp\.port\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['ip','port'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -236,6 +243,7 @@ def get_settings():
         }),
         ('net\.tcp\.service\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['service','ip','port'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -244,6 +252,7 @@ def get_settings():
         }),
         ('net\.tcp\.service.perf\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['service','ip','port'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -252,6 +261,7 @@ def get_settings():
         }),
         ('proc\.mem\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['name','user','method','cmdline'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -260,6 +270,7 @@ def get_settings():
         }),
         ('proc\.num\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['name','user','method','cmdline'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -268,6 +279,7 @@ def get_settings():
         }),
         ('system\.cpu\.load\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['cpu','sampleInterval'],
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
@@ -276,8 +288,10 @@ def get_settings():
         }),
         ('system\.cpu\.util\[([^\]]*)\]', {
             'argParser': 'index', # which parser to use for this item's parameters
+            'argString': '{1}', # the string to pass to the argsParser, this is typically a match group from the mapping's regex key
             'flags': {
                 'namedParameters': ['cpu','type','sampleInterval'],
+                'defaults': {'cpu': '1'},
                 'expandParameters': True # whether to create tags from the parsed params:  Ie, "ifInErrors[eth1]" expands the parameter with the name 'interface' named parameter: interface=eth1
             },
             'metric': 'system.cpu.utilization',
@@ -351,7 +365,7 @@ def get_settings():
             'passwd': 'ReplicateZabbix',
             'db': 'zabbix'
         },
-        'loglevel': 'INFO',
+        'loglevel': 'DEBUG',
         'logfile': '/var/log/zabbix_collector.log',
         'slaveid': 21,                    # Slave identifier, it should be unique.
         'disallow': '[^a-zA-Z0-9\-_\.\/]', # Regex of characters to replace with _.
